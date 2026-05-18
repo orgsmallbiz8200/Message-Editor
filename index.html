@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monday Email Editor</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: Arial, sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: #f6f7fb;
+      color: #222;
+      padding: 40px;
+    }
+
+    .app {
+      max-width: 800px;
+      margin: 0 auto;
+      background: #fff;
+      padding: 30px;
+      border-radius: 14px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 26px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    select,
+    textarea {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #d7d7d7;
+      border-radius: 8px;
+      font-size: 15px;
+      margin-bottom: 20px;
+    }
+
+    textarea {
+      min-height: 320px;
+      resize: vertical;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+
+    button {
+      background: #0073ea;
+      color: white;
+      border: none;
+      padding: 12px 22px;
+      border-radius: 8px;
+      font-size: 15px;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      background: #aaa;
+      cursor: not-allowed;
+    }
+
+    .status {
+      margin-top: 15px;
+      font-size: 14px;
+    }
+
+    .error {
+      color: #d93025;
+    }
+
+    .success {
+      color: #188038;
+    }
+
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+    <h1>Monday Email Editor</h1>
+
+    <label for="emailType">Select Email Type</label>
+    <select id="emailType">
+      <option value="">Loading email types...</option>
+    </select>
+
+    <div id="editorBox" class="hidden">
+      <label for="emailText">Email Text</label>
+      <textarea id="emailText"></textarea>
+
+      <button id="saveBtn">Save</button>
+    </div>
+
+    <div id="status" class="status"></div>
+  </div>
+
+  <script>
+    const MONDAY_API_URL = "https://api.monday.com/v2";
+
+    // IMPORTANT:
+    // Do not expose your real Monday API token in frontend code in production.
+    // Use a backend/API proxy if this app will be shared with users.
+    const MONDAY_API_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjYwODU1OTc2NiwiYWFpIjoxMSwidWlkIjo5NzM5MDU4MywiaWFkIjoiMjAyNi0wMS0xNlQxNDozOToyNi4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6MTMxMDQ5MjAsInJnbiI6InVzZTEifQ.74kdskIpFWz6F_-Zw6mWwkA8LXsZAFEzuJruMXEKzwM";
+
+    const BOARD_ID = 18412884526;
+
+    const emailTypeSelect = document.getElementById("emailType");
+    const emailText = document.getElementById("emailText");
+    const saveBtn = document.getElementById("saveBtn");
+    const editorBox = document.getElementById("editorBox");
+    const statusBox = document.getElementById("status");
+
+    let emailItems = [];
+    let selectedItem = null;
+
+    function getQueryParam(name) {
+      const params = new URLSearchParams(window.location.search);
+      return params.get(name);
+    }
+
+    function setStatus(message, type = "") {
+      statusBox.textContent = message;
+      statusBox.className = "status";
+
+      if (type) {
+        statusBox.classList.add(type);
+      }
+    }
+
+    async function callMondayApi(query, variables = {}) {
+      const response = await fetch(MONDAY_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: MONDAY_API_TOKEN
+        },
+        body: JSON.stringify({
+          query,
+          variables
+        })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || result.errors) {
+        console.error(result);
+        throw new Error(result.errors?.[0]?.message || "Monday API request failed");
+      }
+
+      return result.data;
+    }
+
+    async function fetchEmails() {
+      setStatus("Loading emails...");
+
+      const query = `
+        query GetEmailItems($boardId: [ID!]) {
+          boards(ids: $boardId) {
+            items_page(limit: 500) {
+              items {
+                id
+                name
+                updates {
+                  id
+                  text_body
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      const data = await callMondayApi(query, {
+        boardId: [BOARD_ID]
+      });
+
+      emailItems = data.boards[0].items_page.items || [];
+
+      populateDropdown();
+
+      const itemIdFromUrl = getQueryParam("item_id");
+
+      if (itemIdFromUrl) {
+        autoSelectItem(itemIdFromUrl);
+      }
+
+      setStatus("");
+    }
+
+    function populateDropdown() {
+      emailTypeSelect.innerHTML = "";
+
+      const defaultOption = document.createElement("option");
+      defaultOption.value = "";
+      defaultOption.textContent = "Select an email type";
+      emailTypeSelect.appendChild(defaultOption);
+
+      emailItems.forEach(item => {
+        const option = document.createElement("option");
+        option.value = item.id;
+        option.textContent = item.name;
+        emailTypeSelect.appendChild(option);
+      });
+    }
+
+    function autoSelectItem(itemId) {
+      const foundItem = emailItems.find(item => String(item.id) === String(itemId));
+
+      if (foundItem) {
+        emailTypeSelect.value = foundItem.id;
+        loadSelectedEmail(foundItem.id);
+      } else {
+        setStatus("Item ID from URL was not found in the Monday board.", "error");
+      }
+    }
+
+    function loadSelectedEmail(itemId) {
+      selectedItem = emailItems.find(item => String(item.id) === String(itemId));
+
+      if (!selectedItem) {
+        editorBox.classList.add("hidden");
+        return;
+      }
+
+      const firstUpdate = selectedItem.updates?.[0];
+
+      editorBox.classList.remove("hidden");
+
+      if (!firstUpdate) {
+        emailText.value = "";
+        emailText.placeholder = "No update text found for this email type.";
+        saveBtn.disabled = true;
+        setStatus("This email type has no update available to edit.", "error");
+        return;
+      }
+
+      emailText.value = firstUpdate.text_body || "";
+      saveBtn.disabled = false;
+      setStatus("");
+    }
+
+    async function saveEmailText() {
+      if (!selectedItem) {
+        setStatus("Please select an email type first.", "error");
+        return;
+      }
+
+      const firstUpdate = selectedItem.updates?.[0];
+
+      if (!firstUpdate?.id) {
+        setStatus("No update ID found for this email type.", "error");
+        return;
+      }
+
+      saveBtn.disabled = true;
+      setStatus("Saving...");
+
+      const mutation = `
+        mutation EditUpdate($updateId: ID!, $body: String!) {
+          edit_update(
+            id: $updateId
+            body: $body
+          ) {
+            item_id
+          }
+        }
+      `;
+
+      try {
+        await callMondayApi(mutation, {
+          updateId: firstUpdate.id,
+          body: emailText.value
+        });
+
+        firstUpdate.text_body = emailText.value;
+
+        setStatus("Email text saved successfully.", "success");
+      } catch (error) {
+        setStatus(error.message, "error");
+      } finally {
+        saveBtn.disabled = false;
+      }
+    }
+
+    emailTypeSelect.addEventListener("change", function () {
+      loadSelectedEmail(this.value);
+    });
+
+    saveBtn.addEventListener("click", saveEmailText);
+
+    fetchEmails().catch(error => {
+      console.error(error);
+      emailTypeSelect.innerHTML = `<option value="">Failed to load emails</option>`;
+      setStatus(error.message, "error");
+    });
+  </script>
+</body>
+</html>
