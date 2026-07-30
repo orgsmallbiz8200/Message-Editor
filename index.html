@@ -117,6 +117,8 @@
 
     const BOARD_ID = 18412884526;
 
+    const GROUP_ID = "topics";
+
     const emailTypeSelect = document.getElementById("emailType");
     const emailText = document.getElementById("emailText");
     const saveBtn = document.getElementById("saveBtn");
@@ -167,15 +169,18 @@
       setStatus("Loading emails...");
 
       const query = `
-        query GetEmailItems($boardId: [ID!]) {
+        query GetEmailItems($boardId: [ID!], $groupId: [String]) {
           boards(ids: $boardId) {
-            items_page(limit: 500) {
-              items {
-                id
-                name
-                updates {
+            groups(ids: $groupId) {
+              id
+              items_page(limit: 500) {
+                items {
                   id
-                  text_body
+                  name
+                  updates {
+                    id
+                    text_body
+                  }
                 }
               }
             }
@@ -184,10 +189,11 @@
       `;
 
       const data = await callMondayApi(query, {
-        boardId: [BOARD_ID]
+        boardId: [BOARD_ID],
+        groupId: [GROUP_ID]
       });
 
-      emailItems = data.boards[0].items_page.items || [];
+      emailItems = data.boards[0]?.groups[0]?.items_page.items || [];
 
       populateDropdown();
 
